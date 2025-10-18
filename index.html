@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Schedule App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // Set theme on initial load
+        if (localStorage.getItem('scheduleTheme') === 'dark' || (!('scheduleTheme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        body.resizing {
+            cursor: col-resize;
+            user-select: none;
+        }
+        /* Light Mode scrollbar */
+        #grid-wrapper::-webkit-scrollbar { height: 8px; }
+        #grid-wrapper::-webkit-scrollbar-track { background: #f8fafc; }
+        #grid-wrapper::-webkit-scrollbar-thumb { background-color: #d1d5db; border-radius: 4px; border: 2px solid #f8fafc; }
+        #grid-wrapper::-webkit-scrollbar-thumb:hover { background-color: #9ca3af; }
+
+        /* Dark Mode scrollbar */
+        .dark #grid-wrapper::-webkit-scrollbar-track { background: #1e293b; }
+        .dark #grid-wrapper::-webkit-scrollbar-thumb { background-color: #475569; border-color: #1e293b; }
+        .dark #grid-wrapper::-webkit-scrollbar-thumb:hover { background-color: #64748b; }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: 60px repeat(18, minmax(120px, 1fr));
+            grid-template-rows: 50px repeat(7, minmax(80px, auto));
+            gap: 1px;
+            position: relative;
+        }
+        .grid-row-day { display: contents; }
+        .grid-row-day.hidden-day { display: none; }
+        .task-cell {
+            transition: background-color 0.2s, opacity 0.2s, transform 0.1s ease-in-out;
+            border-width: 1px;
+            word-break: break-word;
+        }
+        .task-cell.dragging {
+            opacity: 0.5;
+            transform: scale(0.95);
+        }
+        .task-cell.drag-over {
+            background-color: #dbeafe !important; /* blue-100 */
+        }
+        .dark .task-cell.drag-over {
+            background-color: #1e3a8a !important; /* blue-900 */
+        }
+        .task-cell.disabled {
+            background-color: #f1f5f9;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .dark .task-cell.disabled {
+            background-color: #334155;
+            opacity: 0.7;
+        }
+        
+        .resizer { position: absolute; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 12; }
+
+        .time-indicator {
+            position: absolute; top: 51px; bottom: 0; width: 2px;
+            background-color: #ef4444; z-index: 15; pointer-events: none; display: none;
+        }
+        .time-indicator::before {
+            content: ''; position: absolute; top: -4px; left: -3px;
+            width: 8px; height: 8px; background-color: #ef4444; border-radius: 50%;
+        }
+        
+        /* Repeat Day Buttons */
+        .day-toggle { transition: background-color .2s, color .2s; }
+
+        .task-cell.completed {
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+        .merged-cell {
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center mb-6">
+            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 dark:text-white">Daily Schedule</h1>
+            <p class="text-slate-500 dark:text-slate-400 mt-2 text-sm sm:text-base">Click a cell to edit, double-click to mark complete, or drag to reschedule.</p>
+        </header>
+
+        <div class="flex justify-between items-center mb-4">
+            <div class="flex bg-slate-200 dark:bg-slate-700 rounded-lg p-1 space-x-1">
+                <button id="week-view-btn" class="px-3 py-1 text-sm font-medium rounded-md transition">Week</button>
+                <button id="day-view-btn" class="px-3 py-1 text-sm font-medium rounded-md transition">Day</button>
+            </div>
+            <button id="settings-btn" class="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-600 dark:text-slate-300"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </button>
+        </div>
+
+        <div id="grid-wrapper" class="bg-white dark:bg-slate-800 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 overflow-x-auto">
+            <div id="schedule-grid" class="grid-container">
+                <div id="time-indicator" class="time-indicator"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="task-modal" class="modal-overlay fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 hidden opacity-0 z-50">
+        <div class="bg-white dark:bg-slate-800 rounded-lg shadow-2xl p-6 w-full max-w-lg transform transition-transform duration-300 scale-95">
+            <h2 id="modal-title" class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mb-4">Set Schedule</h2>
+            <form id="task-form">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Time</label>
+                    <div id="time-scroller" class="flex overflow-x-auto space-x-2 p-2 bg-slate-100 dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-600"></div>
+                </div>
+                <div>
+                    <label for="task-text" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Task</label>
+                    <textarea id="task-text" name="task" rows="3" class="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900" placeholder="Enter your task..."></textarea>
+                </div>
+                
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Repeat</label>
+                        <div id="repeat-days" class="flex flex-wrap gap-2"></div>
+                    </div>
+                    <div>
+                         <label for="notification-time" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Notify Me</label>
+                         <div class="flex items-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                            <select id="notification-time" class="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm bg-white dark:bg-slate-900">
+                                <option value="0">No Notification</option>
+                                <option value="5">5 minutes before</option>
+                                <option value="10">10 minutes before</option>
+                                <option value="15">15 minutes before</option>
+                            </select>
+                         </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex justify-between">
+                    <button type="button" id="delete-task-btn" class="bg-red-100 text-red-700 px-4 py-2 rounded-md hover:bg-red-200 dark:bg-red-900/50 dark:text-red-300 dark:hover:bg-red-900/80 focus:outline-none">Delete</button>
+                    <div class="space-x-3">
+                        <button type="button" id="modal-cancel" class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 px-4 py-2 rounded-md">Cancel</button>
+                        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="settings-modal" class="settings-overlay fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 hidden opacity-0 z-50">
+        <div class="bg-white dark:bg-slate-800 rounded-lg shadow-2xl p-6 w-full max-w-sm">
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white mb-6">Settings</h2>
+            <div class="space-y-4">
+                <div class="flex items-center justify-between p-2 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                    <label for="theme-toggle" class="text-sm font-medium">Dark Mode</label>
+                    <button id="theme-toggle" class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors bg-slate-300 dark:bg-slate-600">
+                        <span class="inline-block w-4 h-4 transform bg-white rounded-full transition-transform translate-x-1 dark:translate-x-6"></span>
+                    </button>
+                </div>
+                <button id="export-btn" class="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition">Export Schedule</button>
+                <button id="import-btn" class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">Import Schedule</button>
+                <input type="file" id="import-file-input" class="hidden" accept=".json">
+                <button id="reset-columns-btn" class="w-full bg-slate-500 text-white px-4 py-2 rounded-md hover:bg-slate-600 transition">Reset Columns</button>
+                <button id="clear-all-btn" class="w-full bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition">Clear All Tasks</button>
+            </div>
+            <div class="mt-6 text-right">
+                <button id="settings-close-btn" class="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-4 py-2 rounded-md">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- ELEMENT SELECTORS ---
+            const scheduleGrid = document.getElementById('schedule-grid');
+            const taskModal = document.getElementById('task-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const taskForm = document.getElementById('task-form');
+            const timeScroller = document.getElementById('time-scroller');
+            const taskTextarea = document.getElementById('task-text');
+            const modalCancelBtn = document.getElementById('modal-cancel');
+            const deleteTaskBtn = document.getElementById('delete-task-btn');
+            const repeatDaysContainer = document.getElementById('repeat-days');
+            const notificationSelect = document.getElementById('notification-time');
+            const settingsBtn = document.getElementById('settings-btn');
+            const settingsModal = document.getElementById('settings-modal');
+            const settingsCloseBtn = document.getElementById('settings-close-btn');
+            const clearAllBtn = document.getElementById('clear-all-btn');
+            const resetColumnsBtn = document.getElementById('reset-columns-btn');
+            const themeToggle = document.getElementById('theme-toggle');
+            const exportBtn = document.getElementById('export-btn');
+            const importBtn = document.getElementById('import-btn');
+            const importFileInput = document.getElementById('import-file-input');
+            const weekViewBtn = document.getElementById('week-view-btn');
+            const dayViewBtn = document.getElementById('day-view-btn');
+            const timeIndicator = document.getElementById('time-indicator');
+
+            // --- STATE & CONSTANTS ---
+            let currentDayForModal = null, selectedHourInModal = 6, currentTaskId = null;
+            let timeIndicatorInterval = null;
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const todayIndex = new Date().getDay();
+            const STORAGE_KEY = 'dailyScheduleApp_tasks_v2';
+            const COLUMNS_STORAGE_KEY = 'dailyScheduleApp_columns';
+            const VIEW_STORAGE_KEY = 'dailyScheduleApp_view';
+            const THEME_STORAGE_KEY = 'scheduleTheme';
+            const taskColorPalette = [
+                { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' }, { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
+                { bg: '#fefce8', border: '#fef08a', text: '#a16207' }, { bg: '#f7fee7', border: '#d9f99d', text: '#4d7c0f' },
+                { bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' }, { bg: '#eef2ff', border: '#c7d2fe', text: '#4338ca' },
+                { bg: '#faf5ff', border: '#e9d5ff', text: '#7e22ce' }, { bg: '#fdf2f8', border: '#fbcfe8', text: '#be123c' }
+            ];
+            
+            // --- HELPERS ---
+            function getWeekDate(dayIndex) {
+                const now = new Date();
+                const currentDay = now.getDay();
+                const date = new Date();
+                date.setDate(now.getDate() + (dayIndex - currentDay));
+                return date;
+            }
+
+            // --- GRID & UI GENERATION ---
+            function generateGrid() {
+                scheduleGrid.innerHTML = '';
+                const cornerCell = document.createElement('div');
+                cornerCell.className = 'grid-cell header-cell day-cell bg-slate-50 dark:bg-slate-800';
+                cornerCell.style.zIndex = '15';
+                scheduleGrid.appendChild(cornerCell);
+                for (let hour = 6; hour <= 23; hour++) {
+                    const timeCell = document.createElement('div');
+                    timeCell.className = 'grid-cell header-cell';
+                    let displayHour = hour % 12 === 0 ? 12 : hour % 12;
+                    let ampm = hour < 12 || hour === 24 ? 'AM' : 'PM';
+                    timeCell.textContent = `${displayHour} ${ampm}`;
+                    scheduleGrid.appendChild(timeCell);
+                }
+                days.forEach((day, dayIndex) => {
+                    const rowWrapper = document.createElement('div');
+                    rowWrapper.className = 'grid-row-day';
+                    rowWrapper.dataset.dayIndex = dayIndex;
+                    const dayCell = document.createElement('div');
+                    dayCell.className = 'grid-cell day-cell';
+                    const isToday = dayIndex === todayIndex;
+                    if(isToday) dayCell.classList.add('today-row');
+                    dayCell.textContent = isToday ? 'Today' : day;
+                    dayCell.addEventListener('click', () => openModal(null, day, 6));
+                    rowWrapper.appendChild(dayCell);
+                    for (let hour = 6; hour <= 23; hour++) {
+                        const taskCell = document.createElement('div');
+                        taskCell.className = 'grid-cell task-cell';
+                        if (isToday) taskCell.classList.add('today-row');
+                        taskCell.id = `${day}-${hour}`;
+                        taskCell.title = 'Click to edit, double-click to mark complete';
+                        let clickTimer = null;
+                        taskCell.addEventListener('click', (e) => {
+                            const existingTaskId = e.target.dataset.taskId;
+                            const dateStr = e.target.dataset.instanceDate;
+                            if (clickTimer) {
+                                clearTimeout(clickTimer);
+                                clickTimer = null;
+                                if (existingTaskId) {
+                                    toggleTaskComplete(existingTaskId, dateStr);
+                                }
+                            } else {
+                                clickTimer = setTimeout(() => {
+                                    openModal(existingTaskId, day, hour);
+                                    clickTimer = null;
+                                }, 250);
+                            }
+                        });
+                        rowWrapper.appendChild(taskCell);
+                    }
+                    scheduleGrid.appendChild(rowWrapper);
+                });
+                scheduleGrid.appendChild(timeIndicator);
+            }
+            function generateTimeScroller() {
+                timeScroller.innerHTML = '';
+                for (let hour = 6; hour <= 23; hour++) {
+                    const slot = document.createElement('button');
+                    slot.type = 'button'; slot.dataset.hour = hour;
+                    slot.className = 'time-slot px-3 py-2 text-sm rounded-md bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600';
+                    let displayHour = hour % 12 === 0 ? 12 : hour % 12; let ampm = hour < 12 ? 'AM' : 'PM';
+                    slot.textContent = `${displayHour} ${ampm}`;
+                    slot.addEventListener('click', () => setSelectedTime(hour));
+                    timeScroller.appendChild(slot);
+                }
+            }
+            function generateRepeatDayToggles() {
+                repeatDaysContainer.innerHTML = '';
+                days.forEach((day, index) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.dataset.day = day;
+                    button.textContent = day.substring(0, 1);
+                    button.className = 'day-toggle w-8 h-8 text-xs font-bold rounded-full bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300';
+                    button.title = day;
+                    button.addEventListener('click', () => {
+                        button.classList.toggle('!bg-blue-600');
+                        button.classList.toggle('!text-white');
+                    });
+                    repeatDaysContainer.appendChild(button);
+                });
+            }
+
+            // --- THEME ---
+            function applyTheme(theme) {
+                localStorage.setItem(THEME_STORAGE_KEY, theme);
+                const span = themeToggle.querySelector('span');
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    span.classList.add('translate-x-6');
+                    span.classList.remove('translate-x-1');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    span.classList.remove('translate-x-6');
+                    span.classList.add('translate-x-1');
+                }
+            }
+
+            // --- DATA HANDLING ---
+            function getTasks() { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+            function saveTasks(tasks) {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+                renderScheduleWithMerging(tasks);
+                scheduleAllNotifications(tasks);
+            }
+
+            // --- NOTIFICATIONS ---
+            function scheduleAllNotifications(tasks) {
+                // Clear existing timeouts? For simplicity, we won't. A real app would need a timeout manager.
+                Object.values(tasks).forEach(task => {
+                    const dateForThisWeek = getWeekDate(days.indexOf(task.day));
+                    const todayStr = new Date().toISOString().slice(0, 10);
+                    if (!task.notification || (task.completed && task.completed[todayStr])) return;
+                    
+                    const now = new Date();
+                    const taskDate = new Date(dateForThisWeek);
+                    const [hour] = task.time.split(':');
+                    taskDate.setHours(hour, 0, 0, 0);
+
+                    const notifyTime = taskDate.getTime() - task.notification * 60 * 1000;
+                    if (notifyTime > now.getTime()) {
+                        const delay = notifyTime - now.getTime();
+                        setTimeout(() => {
+                            new Notification('Task Reminder', { body: `"${task.text}" is starting in ${task.notification} minutes.` });
+                        }, delay);
+                    }
+                });
+            }
+
+            // --- RENDERING & STATE UPDATES ---
+            function updatePastCellsState() {
+                const now = new Date();
+                const currentHour = now.getHours();
+                const todayRow = scheduleGrid.querySelector(`.grid-row-day[data-day-index='${todayIndex}']`);
+                if (todayRow) {
+                    const cells = todayRow.querySelectorAll('.task-cell');
+                    cells.forEach((cell, index) => {
+                        const cellHour = index + 6;
+                        cell.classList.toggle('disabled', cellHour < currentHour);
+                    });
+                }
+            }
+
+            function renderScheduleWithMerging(tasks) {
+                document.querySelectorAll('.task-cell').forEach(cell => {
+                    cell.innerHTML = '';
+                    cell.style.display = 'flex';
+                    cell.style.gridColumn = 'auto';
+                    const isTodayCell = cell.id.startsWith(days[todayIndex]);
+                    cell.className = `grid-cell task-cell ${isTodayCell ? 'today-row' : ''}`;
+                    cell.style.backgroundColor = ''; cell.style.color = ''; cell.style.borderColor = ''; cell.style.fontWeight = '';
+                    cell.draggable = false;
+                    delete cell.dataset.taskId;
+                    delete cell.dataset.instanceDate;
+                });
+
+                const gridData = {};
+                days.forEach((day, dayIndex) => {
+                    const dateForThisDay = getWeekDate(dayIndex);
+                    const dateStr = dateForThisDay.toISOString().slice(0, 10);
+                    Object.values(tasks).forEach(task => {
+                        const isRepeatingOnThisDay = task.repeat && task.repeat.includes(day);
+                        const isSingleInstance = (!task.repeat || task.repeat.length === 0) && task.date === dateStr;
+                        if (isRepeatingOnThisDay || isSingleInstance) {
+                            const [hour] = task.time.split(':');
+                            const cellId = `${day}-${hour}`;
+                            gridData[cellId] = {
+                                ...task,
+                                isCompleted: task.completed && task.completed[dateStr] || false,
+                                instanceDate: dateStr
+                            };
+                        }
+                    });
+                });
+                
+                days.forEach(day => {
+                    const dailyTaskColors = new Map(); 
+                    let nextColorIndex = 0;
+                    const getDailyColorForTask = (text) => {
+                        if (!text) return null;
+                        if (!dailyTaskColors.has(text)) {
+                            const color = taskColorPalette[nextColorIndex];
+                            dailyTaskColors.set(text, color);
+                            nextColorIndex = (nextColorIndex + 1) % taskColorPalette.length;
+                        }
+                        return dailyTaskColors.get(text);
+                    };
+
+                    for (let h = 6; h <= 23; h++) {
+                        const cellId = `${day}-${h}`;
+                        const cell = document.getElementById(cellId);
+                        if (!cell) continue;
+                        const taskData = gridData[cellId];
+                        if (taskData) {
+                            cell.innerText = taskData.text;
+                            cell.dataset.taskId = taskData.id;
+                            cell.dataset.instanceDate = taskData.instanceDate;
+                            cell.draggable = true;
+                            const color = getDailyColorForTask(taskData.text);
+                            if (color) {
+                                cell.style.backgroundColor = color.bg; cell.style.color = color.text;
+                                cell.style.borderColor = color.border; cell.style.fontWeight = '500';
+                            }
+                            if (taskData.isCompleted) cell.classList.add('completed');
+                        }
+                    }
+                    
+                    let h = 6;
+                    while (h <= 23) {
+                        const currentTaskData = gridData[`${day}-${h}`];
+                        if (!currentTaskData || !currentTaskData.text) { h++; continue; }
+                        let spanCount = 1;
+                        while (h + spanCount <= 23) {
+                            const nextTaskData = gridData[`${day}-${h + spanCount}`];
+                            if (nextTaskData && nextTaskData.text === currentTaskData.text && nextTaskData.isCompleted === currentTaskData.isCompleted) {
+                                spanCount++;
+                            } else { break; }
+                        }
+                        if (spanCount > 1) {
+                            const startCell = document.getElementById(`${day}-${h}`);
+                            if (startCell) {
+                                startCell.style.gridColumn = `span ${spanCount}`;
+                                startCell.classList.add('merged-cell');
+                                for (let i = 1; i < spanCount; i++) {
+                                    const mergedCell = document.getElementById(`${day}-${h + i}`);
+                                    if (mergedCell) mergedCell.style.display = 'none';
+                                }
+                            }
+                        }
+                        h += spanCount;
+                    }
+                });
+                updatePastCellsState();
+            }
+
+            // --- DRAG AND DROP ---
+            function initializeDragAndDrop() {
+                scheduleGrid.addEventListener('dragstart', e => {
+                    if (e.target.classList.contains('task-cell') && e.target.dataset.taskId) {
+                        e.dataTransfer.setData('text/plain', e.target.dataset.taskId);
+                        e.target.classList.add('dragging');
+                    }
+                });
+                scheduleGrid.addEventListener('dragend', e => e.target.classList.remove('dragging'));
+                scheduleGrid.addEventListener('dragover', e => {
+                    e.preventDefault();
+                    if (e.target.classList.contains('task-cell')) e.target.classList.add('drag-over');
+                });
+                scheduleGrid.addEventListener('dragleave', e => e.target.classList.remove('drag-over'));
+                scheduleGrid.addEventListener('drop', e => {
+                    e.preventDefault();
+                    e.target.classList.remove('drag-over');
+                    const taskId = e.dataTransfer.getData('text/plain');
+                    const targetCell = e.target.closest('.task-cell');
+                    if (!taskId || !targetCell) return;
+                    const allTasks = getTasks();
+                    const task = allTasks[taskId];
+                    if (!task) return;
+                    const [day, hourStr] = targetCell.id.split('-');
+                    task.day = day;
+                    task.time = `${parseInt(hourStr)}:00`;
+                    task.date = getWeekDate(days.indexOf(day)).toISOString().slice(0, 10);
+                    task.repeat = [];
+                    saveTasks(allTasks);
+                });
+            }
+            
+             // --- COLUMN RESIZING ---
+            function loadColumnWidths() {
+                const savedWidths = localStorage.getItem(COLUMNS_STORAGE_KEY);
+                if (savedWidths) scheduleGrid.style.gridTemplateColumns = savedWidths;
+            }
+            function initializeResizing() {
+                 const headers = scheduleGrid.querySelectorAll('.header-cell:not(.day-cell)');
+                if (!headers.length) return;
+                let currentLeft = headers[0].offsetLeft + headers[0].offsetWidth;
+                headers.forEach((header, index) => {
+                    if (index < headers.length -1) {
+                        const resizer = document.createElement('div');
+                        resizer.className = 'resizer';
+                        resizer.style.left = `${currentLeft - 2.5}px`;
+                        resizer.dataset.columnIndex = index + 1;
+                        scheduleGrid.appendChild(resizer);
+                        addResizerListener(resizer);
+                        if(headers[index + 1]) currentLeft += headers[index + 1].offsetWidth;
+                    }
+                });
+            }
+            function addResizerListener(resizer) { 
+                 let initialX, initialWidths;
+                resizer.addEventListener('mousedown', (e) => {
+                    e.preventDefault(); initialX = e.clientX;
+                    initialWidths = window.getComputedStyle(scheduleGrid).getPropertyValue('grid-template-columns').split(' ');
+                    document.body.classList.add('resizing');
+                    document.addEventListener('mousemove', handleMouseMove);
+                    document.addEventListener('mouseup', handleMouseUp);
+                });
+                function handleMouseMove(e) {
+                    const deltaX = e.clientX - initialX;
+                    const columnIndex = parseInt(resizer.dataset.columnIndex);
+                    const newWidths = [...initialWidths];
+                    const newWidth = Math.max(50, parseFloat(initialWidths[columnIndex]) + deltaX);
+                    newWidths[columnIndex] = `${newWidth}px`;
+                    scheduleGrid.style.gridTemplateColumns = newWidths.join(' ');
+                }
+                function handleMouseUp() {
+                    document.body.classList.remove('resizing');
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                    localStorage.setItem(COLUMNS_STORAGE_KEY, scheduleGrid.style.gridTemplateColumns);
+                    repositionResizers();
+                }
+            }
+            function repositionResizers() {
+                scheduleGrid.querySelectorAll('.resizer').forEach(r => r.remove());
+                initializeResizing();
+            }
+
+            // --- MODALS & VIEWS ---
+            function openModal(taskId, day, hour) {
+                currentTaskId = taskId;
+                currentDayForModal = day;
+                selectedHourInModal = hour;
+                const tasks = getTasks();
+                const task = taskId ? tasks[taskId] : {};
+                const dayName = days[todayIndex] === day ? 'Today' : day;
+                modalTitle.textContent = taskId ? 'Edit Task' : `New Task for ${dayName}`;
+                taskTextarea.value = task.text || '';
+                notificationSelect.value = task.notification || '0';
+                deleteTaskBtn.style.display = taskId ? 'flex' : 'none';
+                setSelectedTime(hour);
+                
+                repeatDaysContainer.querySelectorAll('button').forEach(btn => {
+                    const day = btn.dataset.day;
+                    const shouldBeActive = task.repeat && task.repeat.includes(day);
+                    btn.classList.toggle('!bg-blue-600', shouldBeActive);
+                    btn.classList.toggle('!text-white', shouldBeActive);
+                });
+
+                const timeSlots = timeScroller.querySelectorAll('.time-slot');
+                const now = new Date();
+                const currentHour = now.getHours();
+                const isToday = currentDayForModal === days[todayIndex];
+                timeSlots.forEach(slot => {
+                    const slotHour = parseInt(slot.dataset.hour);
+                    const isDisabled = isToday && slotHour < currentHour;
+                    slot.disabled = isDisabled;
+                    slot.classList.toggle('opacity-50', isDisabled);
+                    slot.classList.toggle('cursor-not-allowed', isDisabled);
+                });
+
+
+                taskModal.classList.remove('hidden');
+                setTimeout(() => {
+                    taskModal.classList.remove('opacity-0');
+                    taskModal.querySelector('div').classList.remove('scale-95');
+                    taskTextarea.focus();
+                }, 10);
+            }
+            function closeModal(modalElem) {
+                 modalElem.classList.add('opacity-0');
+                 modalElem.querySelector('div').classList.add('scale-95');
+                 setTimeout(() => modalElem.classList.add('hidden'), 300);
+            }
+             function setSelectedTime(hour) { 
+                selectedHourInModal = hour;
+                timeScroller.querySelectorAll('.time-slot').forEach(s => s.classList.toggle('selected', s.dataset.hour == hour));
+                const selectedSlot = timeScroller.querySelector(`.time-slot[data-hour='${hour}']`);
+                if (selectedSlot) selectedSlot.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }
+             function setView(view) {
+                localStorage.setItem(VIEW_STORAGE_KEY, view);
+                scheduleGrid.querySelectorAll('.grid-row-day').forEach(row => {
+                    row.classList.toggle('hidden-day', view === 'day' && row.dataset.dayIndex != todayIndex);
+                });
+                dayViewBtn.classList.toggle('bg-white', view === 'day');
+                dayViewBtn.classList.toggle('dark:bg-slate-900', view === 'day');
+                weekViewBtn.classList.toggle('bg-white', view === 'week');
+                 weekViewBtn.classList.toggle('dark:bg-slate-900', view === 'week');
+                updateTimeIndicator();
+                repositionResizers();
+            }
+             function updateTimeIndicator() {
+                const now = new Date();
+                if (now < new Date(now).setHours(6,0,0,0) || now >= new Date(now).setHours(24,0,0,0)) {
+                    timeIndicator.style.display = 'none'; return;
+                }
+                const todayRow = scheduleGrid.querySelector(`.grid-row-day[data-day-index='${todayIndex}']`);
+                if(!todayRow || todayRow.classList.contains('hidden-day')) { timeIndicator.style.display = 'none'; return; }
+                const dayCell = todayRow.querySelector('.day-cell');
+                const startOfDay = new Date().setHours(6, 0, 0, 0);
+                const totalDuration = 18 * 60 * 60 * 1000;
+                const elapsedDuration = now.getTime() - startOfDay;
+                const percentage = (elapsedDuration / totalDuration) * 100;
+                timeIndicator.style.display = 'block';
+                timeIndicator.style.top = `${dayCell.offsetTop}px`;
+                timeIndicator.style.height = `${dayCell.offsetHeight}px`;
+                timeIndicator.style.left = `calc(${dayCell.offsetWidth}px + (100% - ${dayCell.offsetWidth}px) * ${percentage / 100})`;
+            }
+            function toggleTaskComplete(taskId, instanceDate) {
+                const tasks = getTasks();
+                const task = tasks[taskId];
+                if (!task) return;
+                if (!task.completed) task.completed = {};
+                task.completed[instanceDate] = !task.completed[instanceDate];
+                saveTasks(tasks);
+            }
+
+            // --- INITIALIZATION ---
+            function initializeApp() {
+                generateGrid();
+                loadColumnWidths();
+                generateTimeScroller();
+                generateRepeatDayToggles();
+                
+                setView(localStorage.getItem(VIEW_STORAGE_KEY) || 'week');
+                applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+                
+                const allTasks = getTasks();
+                renderScheduleWithMerging(allTasks);
+                scheduleAllNotifications(allTasks);
+                
+                initializeResizing();
+                initializeDragAndDrop();
+                
+                updateTimeIndicator();
+                updatePastCellsState();
+                if(timeIndicatorInterval) clearInterval(timeIndicatorInterval);
+                timeIndicatorInterval = setInterval(() => {
+                    updateTimeIndicator();
+                    updatePastCellsState();
+                }, 60000);
+
+                // --- EVENT LISTENERS ---
+                taskForm.addEventListener('submit', e => {
+                    e.preventDefault();
+                    const tasks = getTasks();
+                    const text = taskTextarea.value.trim();
+                    if (!text) return;
+
+                    const id = currentTaskId || `task_${Date.now()}`;
+                    const selectedRepeatDays = Array.from(repeatDaysContainer.querySelectorAll('button.day-toggle.\\!bg-blue-600')).map(b => b.dataset.day);
+                    
+                    tasks[id] = {
+                        id,
+                        text,
+                        time: `${selectedHourInModal}:00`,
+                        day: currentDayForModal,
+                        date: getWeekDate(days.indexOf(currentDayForModal)).toISOString().slice(0, 10),
+                        repeat: selectedRepeatDays,
+                        notification: parseInt(notificationSelect.value),
+                        completed: (tasks[id] && tasks[id].completed) || {}
+                    };
+                    saveTasks(tasks);
+                    closeModal(taskModal);
+                });
+                deleteTaskBtn.addEventListener('click', () => {
+                    if (!currentTaskId) return;
+                    const tasks = getTasks();
+                    delete tasks[currentTaskId];
+                    saveTasks(tasks);
+                    closeModal(taskModal);
+                });
+                modalCancelBtn.addEventListener('click', () => closeModal(taskModal));
+                taskModal.addEventListener('click', e => { if (e.target === taskModal) closeModal(taskModal); });
+                settingsBtn.addEventListener('click', () => {
+                    settingsModal.classList.remove('hidden');
+                    setTimeout(() => {
+                        settingsModal.classList.remove('opacity-0');
+                        settingsModal.querySelector('div').classList.remove('scale-95');
+                    }, 10);
+                });
+                settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
+                settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeModal(settingsModal); });
+                clearAllBtn.addEventListener('click', () => {
+                    if(confirm('Are you sure you want to delete all tasks? This cannot be undone.')) {
+                        saveTasks({});
+                        closeModal(settingsModal);
+                    }
+                });
+                resetColumnsBtn.addEventListener('click', () => {
+                    localStorage.removeItem(COLUMNS_STORAGE_KEY);
+                    scheduleGrid.style.gridTemplateColumns = '';
+                    repositionResizers();
+                    closeModal(settingsModal);
+                });
+                weekViewBtn.addEventListener('click', () => setView('week'));
+                dayViewBtn.addEventListener('click', () => setView('day'));
+                themeToggle.addEventListener('click', () => applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark'));
+                exportBtn.addEventListener('click', () => {
+                    const tasks = localStorage.getItem(STORAGE_KEY) || '{}';
+                    const blob = new Blob([tasks], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = `schedule_backup_${new Date().toISOString().slice(0, 10)}.json`; a.click();
+                    URL.revokeObjectURL(url);
+                });
+                importBtn.addEventListener('click', () => importFileInput.click());
+                importFileInput.addEventListener('change', e => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const importedTasks = JSON.parse(event.target.result);
+                            if (typeof importedTasks !== 'object' || importedTasks === null) throw new Error();
+                            saveTasks(importedTasks);
+                            alert('Schedule imported successfully!');
+                        } catch { alert('Invalid schedule file.'); }
+                    };
+                    reader.readAsText(file);
+                });
+                 // Notification Permission
+                if(Notification.permission === 'default') {
+                    setTimeout(() => alert('Allow notifications to get task reminders!'), 5000);
+                }
+                notificationSelect.addEventListener('change', () => {
+                    if (notificationSelect.value !== '0' && Notification.permission !== 'granted') {
+                        Notification.requestPermission();
+                    }
+                });
+            }
+
+            initializeApp();
+        });
+    </script>
+</body>
+</html>
+
