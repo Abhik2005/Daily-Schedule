@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daily Schedule App</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='10' y='10' width='80' height='80' rx='15' fill='%233b82f6'/><path d='M30 55 l15 15 l30 -30' stroke='white' stroke-width='12' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -789,20 +790,40 @@
             }
             function updateTimeIndicator() {
                 const now = new Date();
-                if (now < new Date(now).setHours(6,0,0,0) || now >= new Date(now).setHours(24,0,0,0)) {
-                    timeIndicator.style.display = 'none'; return;
+                const currentHour = now.getHours();
+
+                if (currentHour < 6) {
+                    timeIndicator.style.display = 'none';
+                    return;
                 }
+
                 const todayRow = scheduleGrid.querySelector(`.grid-row-day[data-day-index='${todayIndex}']`);
-                if(!todayRow || todayRow.classList.contains('hidden-day')) { timeIndicator.style.display = 'none'; return; }
+                if (!todayRow || todayRow.classList.contains('hidden-day')) {
+                    timeIndicator.style.display = 'none';
+                    return;
+                }
+
+                const currentMinutes = now.getMinutes();
+                const hourColumnIndex = currentHour - 6;
+                const headerCells = Array.from(scheduleGrid.querySelectorAll('.header-cell:not(.day-cell)'));
+                
+                if (hourColumnIndex < 0 || hourColumnIndex >= headerCells.length) {
+                    timeIndicator.style.display = 'none';
+                    return;
+                }
+
+                const currentHourHeaderCell = headerCells[hourColumnIndex];
+                
+                const columnLeft = currentHourHeaderCell.offsetLeft;
+                const columnWidth = currentHourHeaderCell.offsetWidth;
+                const minuteOffset = (currentMinutes / 60) * columnWidth;
+                const finalLeftPosition = columnLeft + minuteOffset;
+
                 const dayCell = todayRow.querySelector('.day-cell');
-                const startOfDay = new Date().setHours(6, 0, 0, 0);
-                const totalDuration = 18 * 60 * 60 * 1000;
-                const elapsedDuration = now.getTime() - startOfDay;
-                const percentage = (elapsedDuration / totalDuration) * 100;
                 timeIndicator.style.display = 'block';
                 timeIndicator.style.top = `${dayCell.offsetTop}px`;
                 timeIndicator.style.height = `${dayCell.offsetHeight}px`;
-                timeIndicator.style.left = `calc(${dayCell.offsetWidth}px + (100% - ${dayCell.offsetWidth}px) * ${percentage / 100})`;
+                timeIndicator.style.left = `${finalLeftPosition}px`;
             }
             function toggleTaskComplete(taskId, instanceDate) {
                 const tasks = getTasks();
